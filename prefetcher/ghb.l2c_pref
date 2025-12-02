@@ -59,6 +59,7 @@ uint32_t CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache
 
     GHB_Entry *ghb_entry = ghb + ghb_head_idx;
 
+    // >>>>>>>>>> Collision Catch in GHB Starts >>>>>>>>>>
     // invalidate prev of more recent GHB entry
     if (ghb_entry->next) {
         ghb_entry->next->prev = NULL;
@@ -68,21 +69,21 @@ uint32_t CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache
     if (ghb_entry->it) {
         ghb_entry->it->ghb_ptr = NULL;
     }
-
+    // <<<<<<<<<<< Collision Catch in GHB Ends <<<<<<<<<<<
+    
     // insert new entry into GHB 
     ghb_entry->addr = cl_addr;
     ghb_entry->prev = it_entry->ghb_ptr;
     ghb_entry->it = it_entry;
     it_entry->ghb_ptr = ghb_entry;
 
+    // increment GHB head
+    ghb_head_idx = (ghb_head_idx + 1) % GHB_SIZE;
     // update pointers of previous entry
     if (ghb_entry->prev) {
         ghb_entry->prev->next = ghb_entry;
         ghb_entry->prev->it = NULL;
     }
-
-    // increment GHB head
-    ghb_head_idx = (ghb_head_idx + 1) % GHB_SIZE;
 
     // calculate prefetch addresses
     pf_addr_list.clear();
