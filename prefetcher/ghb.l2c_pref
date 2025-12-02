@@ -70,7 +70,7 @@ uint32_t CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache
         ghb_entry->it->ghb_ptr = NULL;
     }
     // <<<<<<<<<<< Collision Catch in GHB Ends <<<<<<<<<<<
-    
+
     // insert new entry into GHB 
     ghb_entry->addr = cl_addr;
     ghb_entry->prev = it_entry->ghb_ptr;
@@ -79,10 +79,11 @@ uint32_t CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache
 
     // increment GHB head
     ghb_head_idx = (ghb_head_idx + 1) % GHB_SIZE;
+
     // update pointers of previous entry
     if (ghb_entry->prev) {
         ghb_entry->prev->next = ghb_entry;
-        ghb_entry->prev->it = NULL;
+        ghb_entry->prev->it = NULL; // no longer the latest ghb entry, so dont track the IT entry anymore
     }
 
     // calculate prefetch addresses
