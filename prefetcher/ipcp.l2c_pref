@@ -1,0 +1,107 @@
+#include "cache.h"
+
+static constexpr int GHB_SIZE   = 8192; // 13 bits
+static constexpr int IT_SIZE    = 4096; // 12 bits
+static constexpr int LOOKBACK   = 16;   // 4 bits
+
+static constexpr int IP_TAG_BITS = 12; // for GHB tag matching
+static constexpr uint64_t IP_TAG_MASK = (1ULL << IP_TAG_BITS) - 1;
+
+
+struct GHB_ENTRY {
+    int64_t delta;
+    int prev;
+    uint64_t ip_tag;
+};
+
+static GHB_ENTRY ghb[GHB_SIZE];
+static int it[IT_SIZE];
+static int ghb_head;
+
+static uint64_t last_cl[IT_SIZE];
+static bool     has_last[IT_SIZE];
+
+static inline uint64_t cl_addr(uint64_t addr) {
+    return addr >> LOG2_BLOCK_SIZE;
+}
+
+static inline uint32_t ip_hash(uint64_t ip) {
+    return (ip >> (2 + IP_TAG_BITS)) & (IT_SIZE - 1);
+}
+
+static inline uint32_t ghb_tag_mask(uint64_t ip) {
+    return (ip & IP_TAG_MASK);
+}
+
+static inline int read_delta_chain(uint64_t ip, int64_t out_deltas[LOOKBACK]) {
+    uint32_t idx = ip_hash(ip);
+    uint32_t tag = ghb_tag_mask(ip);
+    int ptr = it[idx]; // find the ghb table index
+    int n = 0;
+
+    while (ptr != -1 && n < LOOKBACK) {
+        if (ghb[ptr].ip_tag != tag) break;
+
+        out_deltas[n++] = ghb[ptr].delta;
+        ptr = ghb[ptr].prev;
+    }
+    return n; // number of deltas in this global stream
+}
+
+void CACHE::l2c_prefetcher_initialize() {
+    for (int i = 0; i < IT_SIZE; i++)
+        it[i] = -1;
+
+    ghb_head = 0;
+
+    // Optional: clear ghb
+    for (int i = 0; i < GHB_SIZE; i++) {
+        ghb[i].delta = 0;
+        ghb[i].prev = -1;
+        ghb[i].ip_tag = 0;
+    }
+}
+
+uint32_t CACHE::l2c_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint32_t metadata_in) {
+    const uint64_t curr_cl = cl_addr(addr);
+    const uint32_t idx = ip_hash(ip);
+
+    // First access for this IP
+    if (!has_last[idx]) {
+        last_cl[idx] = curr_cl;
+        has_last[idx] = true;
+        return metadata_in;
+    }
+
+    int64_t delta = (int64_t)curr_cl - (int64_t)last_cl[idx];
+    last_cl[idx] = curr_cl;
+
+    ghb[ghb_head].delta     = delta;
+    ghb[ghb_head].prev      = it[idx];
+    ghb[ghb_head].ip_tag    = ghb_tag_mask(ip);
+
+    // update chain head for this IP bucket
+    it[idx] = ghb_head;
+
+    // advance ring head
+    ghb_head = (ghb_head + 1) % GHB_SIZE;
+
+    if (delta != 0) {
+        uint64_t pf_cl = curr_cl + delta;
+        uint64_t pf_addr = pf_cl << LOG2_BLOCK_SIZE;
+        prefetch_line(ip, addr, pf_addr, FILL_L2, 0);
+    }
+
+    return metadata_in;
+}
+
+
+uint32_t CACHE::l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint32_t metadata_in)
+{
+  return metadata_in;
+}
+
+void CACHE::l2c_prefetcher_final_stats()
+{
+    cout << "CPU " << cpu << " L2 Bouquet Prefetcher Final Stats" << endl;
+}
